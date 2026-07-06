@@ -1,0 +1,226 @@
+use std::collections::HashMap;
+use std::marker::PhantomData;
+
+use crate::config::Config;
+use crate::crypto::{CryptoProvider, Signer};
+use crate::error::ConsensusError;
+use crate::message::{Justification, Message, Proposal, Timeout, Vote};
+use crate::types::{Digest, NodeId, Sequence, View};
+
+/// Entry-point for a Simplex consensus replica.
+///
+/// # Type parameters
+///
+/// * `P` — the opaque payload / command type.
+/// * `N` — the network transport (see [`crate::network::Network`]).
+/// * `S` — the application state-machine (see [`crate::state::StateMachine`]).
+/// * `C` — cryptographic primitives (see [`crate::crypto::CryptoProvider`]).
+/// * `K` — the signing key for this replica (see [`crate::crypto::Signer`]).
+pub struct Simplex<P, N, S, C, K> {
+    config: Config,
+    network: N,
+    state_machine: S,
+    crypto: C,
+    signer: K,
+
+    // --- Protocol state ---
+    /// The current view.
+    view: View,
+    /// The highest sequence that has been committed.
+    committed_seq: Sequence,
+    /// The digest of the last committed state.
+    locked_digest: Digest,
+    /// The highest `(view, seq)` this replica has voted for.
+    highest_vote: Option<(View, Sequence)>,
+    /// Buffer of received timeout messages per view, used to build [`TimeoutCert`].
+    timeout_buffer: HashMap<View, Vec<Timeout>>,
+
+    /// Marker — the engine does not store payloads directly, but the type flows
+    /// through all message handlers.
+    _phantom: PhantomData<P>,
+}
+
+impl<P, N, S, C, K> Simplex<P, N, S, C, K>
+where
+    P: Clone + Send + Sync + 'static + serde::Serialize,
+    N: crate::network::Network<P>,
+    S: crate::state::StateMachine<P>,
+    C: CryptoProvider,
+    K: Signer,
+{
+    /// Create a fresh simplex instance.
+    pub fn new(config: Config, network: N, state_machine: S, crypto: C, signer: K) -> Self {
+        let locked_digest = state_machine.digest();
+        Self {
+            config,
+            network,
+            state_machine,
+            crypto,
+            signer,
+            view: 0,
+            committed_seq: 0,
+            locked_digest,
+            highest_vote: None,
+            timeout_buffer: HashMap::new(),
+            _phantom: PhantomData,
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  Public entry-points
+    // ------------------------------------------------------------------
+
+    /// Called when a protocol message is received from the network.
+    pub fn on_message(
+        &mut self,
+        from: NodeId,
+        msg: Message<P>,
+    ) -> Result<(), ConsensusError> {
+        match msg {
+            Message::Proposal(p) => self.handle_proposal(from, p),
+            Message::Vote(v) => self.handle_vote(from, v),
+            Message::Timeout(t) => self.handle_timeout(from, t),
+        }
+    }
+
+    /// Start a new view — typically called after a timeout or on bootstrap.
+    ///
+    /// If `self` is the leader of the new view it will construct and broadcast a proposal.
+    pub fn start_view(&mut self, view: View) -> Result<(), ConsensusError> {
+        self.view = view;
+        if self.config.replica_set.is_leader_of(self.signer.node_id(), view) {
+            self.propose(view)?;
+        }
+        Ok(())
+    }
+
+    /// Current view of this replica.
+    pub fn view(&self) -> View {
+        self.view
+    }
+
+    /// The last committed sequence number.
+    pub fn committed_sequence(&self) -> Sequence {
+        self.committed_seq
+    }
+
+    // ------------------------------------------------------------------
+    //  Internal handlers
+    // ------------------------------------------------------------------
+
+    fn handle_proposal(
+        &mut self,
+        _from: NodeId,
+        proposal: Proposal<P>,
+    ) -> Result<(), ConsensusError> {
+        // 1. Verify the justification.
+        self.verify_justification(&proposal.justification, proposal.view)?;
+
+        // 2. Validate payload against the state machine.
+        for cmd in &proposal.payload {
+            self.state_machine.validate(cmd)?;
+        }
+
+        // 3. If safe, vote for the proposal.
+        let vote = self.build_vote(&proposal)?;
+        self.network.broadcast(Message::Vote(vote))?;
+
+        Ok(())
+    }
+
+    fn handle_vote(&mut self, _from: NodeId, vote: Vote) -> Result<(), ConsensusError> {
+        // 1. Verify the vote signature.
+        self.crypto.verify(
+            vote.voter,
+            &self.vote_digest_bytes(&vote.view, &vote.digest),
+            &vote.signature,
+        )?;
+
+        // 2. Accumulate votes; if quorum is reached, commit.
+        //    (Simplified — full impl builds a QC from collected votes.)
+        let _ = vote; // stub: real impl stores votes and checks for quorum
+        Ok(())
+    }
+
+    fn handle_timeout(&mut self, _from: NodeId, timeout: Timeout) -> Result<(), ConsensusError> {
+        // 1. Verify the timeout signature.
+        self.crypto.verify(
+            timeout.sender,
+            &self.timeout_digest_bytes(&timeout),
+            &timeout.signature,
+        )?;
+
+        // 2. Accumulate timeouts; if `2f+1` are collected, build a TC and advance view.
+        self.timeout_buffer
+            .entry(timeout.next_view)
+            .or_default()
+            .push(timeout);
+
+        // Stub: check for quorum and advance view if so.
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    //  Helpers
+    // ------------------------------------------------------------------
+
+    /// The leader constructs and broadcasts a new proposal for the given view.
+    fn propose(&mut self, view: View) -> Result<(), ConsensusError> {
+        let proposal = Proposal {
+            view,
+            sequence: self.committed_seq + 1,
+            parent: self.locked_digest,
+            payload: Vec::new(), // Host feeds pending commands here.
+            justification: self.build_justification(view),
+        };
+        self.network.broadcast(Message::Proposal(proposal))?;
+        Ok(())
+    }
+
+    fn build_vote(&self, proposal: &Proposal<P>) -> Result<Vote, ConsensusError> {
+        let digest = self.crypto.hash(&bincode_like_serialize(proposal));
+        let sig = self.signer.sign(&self.vote_digest_bytes(&proposal.view, &digest))?;
+        Ok(Vote {
+            view: proposal.view,
+            sequence: proposal.sequence,
+            digest,
+            voter: self.signer.node_id(),
+            signature: sig,
+        })
+    }
+
+    fn build_justification(&self, _view: View) -> Justification {
+        // Real impl: return the highest QC or TC known.
+        Justification::Genesis
+    }
+
+    fn verify_justification(
+        &self,
+        _jc: &Justification,
+        _view: View,
+    ) -> Result<(), ConsensusError> {
+        // Real impl: verify the QC/TC signatures.
+        Ok(())
+    }
+
+    fn vote_digest_bytes(&self, view: &View, digest: &Digest) -> Vec<u8> {
+        let mut out = view.to_le_bytes().to_vec();
+        out.extend_from_slice(digest);
+        out
+    }
+
+    fn timeout_digest_bytes(&self, t: &Timeout) -> Vec<u8> {
+        let mut out = t.current_view.to_le_bytes().to_vec();
+        out.extend_from_slice(&t.next_view.to_le_bytes());
+        if let Some((v, s)) = &t.high_vote {
+            out.extend_from_slice(&v.to_le_bytes());
+            out.extend_from_slice(&s.to_le_bytes());
+        }
+        out
+    }
+}
+
+/// Placeholder for a real serialization scheme (e.g. bincode or postcard).
+fn bincode_like_serialize<T: serde::Serialize>(v: &T) -> Vec<u8> {
+    bincode::serialize(v).unwrap_or_default()
+}

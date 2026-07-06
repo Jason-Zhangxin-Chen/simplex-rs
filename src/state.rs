@@ -1,0 +1,22 @@
+use crate::types::{Digest, Sequence};
+
+/// Abstraction over the replicated state machine (blockchain, KV store, etc.).
+///
+/// The consensus engine commits commands in total order via [`StateMachine::apply`]
+/// and the host queries the current state digest via [`StateMachine::digest`].
+pub trait StateMachine<P>: Send + Sync {
+    /// Validate a command **without** applying it. Used during proposal verification.
+    fn validate(&self, command: &P) -> Result<(), crate::error::ConsensusError>;
+
+    /// Apply a batch of commands in the given total order.
+    ///
+    /// Returns a digest of the new state after applying this batch.
+    fn apply(
+        &mut self,
+        sequence: Sequence,
+        batch: &[P],
+    ) -> Result<Digest, crate::error::ConsensusError>;
+
+    /// Current state digest.
+    fn digest(&self) -> Digest;
+}
