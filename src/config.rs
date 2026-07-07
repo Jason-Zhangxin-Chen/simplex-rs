@@ -7,7 +7,7 @@ pub struct Config {
     pub own_id: super::types::NodeId,
 
     /// The full replica set.
-    pub replica_set: super::types::ReplicaSet,
+    pub replica_set: super::types::CommitteeSet,
 
     /// Base timeout for a view change. Multiplied by `view` for exponential back-off
     /// (or tune via `view_timeout_fn`).

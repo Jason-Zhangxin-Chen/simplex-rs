@@ -91,6 +91,10 @@ where
         if self.config.replica_set.is_leader_of(self.signer.node_id(), view) {
             self.propose(view)?;
         }
+        // todo: for none leader nodes, they should start the timer of 3 Delta for liveness.
+        // If there is no proposal received within 3 Delta, they should send a vote for dummy block
+        // to the network, and if there are over quorum vote for dummy block, view change is triggerd.
+
         Ok(())
     }
 
@@ -113,6 +117,16 @@ where
         _from: NodeId,
         proposal: Proposal<P>,
     ) -> Result<(), ConsensusError> {
+        // todo: if the proposal isn't from the leader of the current view, emit accountability
+        // event.
+
+        // todo: if we already voted for current view, skip voting for any other proposal.
+
+        // todo: the proposal should be corrected formed.
+
+        // Pipeline optimized by merging the last view's commit and current view's propose phase.
+        // todo: verify the certificate of the last view's proposal, if its valid, commit the
+        // last proposal, and then verify the new proposal of current view, if it is valid, vote for it.
         // 1. Verify the justification.
         self.verify_justification(&proposal.justification, proposal.view)?;
 
