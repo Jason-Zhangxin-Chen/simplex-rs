@@ -19,4 +19,7 @@ pub trait StateMachine<P>: Send + Sync {
 
     /// Current state digest.
     fn digest(&self) -> Digest;
+    
+    /// todo: add a subscriber that the clients can subscribe the chain head event to update the
+    /// latest view from consensus engine.
 }

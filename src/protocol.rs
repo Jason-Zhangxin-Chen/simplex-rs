@@ -23,6 +23,18 @@ pub struct Simplex<P, N, S, C, K> {
     crypto: C,
     signer: K,
 
+    // todo: review below protocol state.
+
+    // todo: add the WAL (write ahead log) for the engine, missing WAL might cause safety issue for
+    // the engine. Here is a scenario:
+    // There are 4 nodes: A, B, C, D on the same view V_n.
+    // At the next consensus instance, the protocol have made decision to commit P1 to V_n+1;
+    // However a disaster causes:
+    // A commits P1 to V_n+1, but B, C, D crash before they commit P1 to V_n+1.
+    // After the disaster, A is the only node that has committed P1 to V_n+1, and B, C, D are still on V_n.
+    // If A crashes without a recovery, then B, C, D recovery to make new decision P2 to V_n+1,
+    // which will cause a safety issue, because A has already committed P1 to V_n+1.
+
     // --- Protocol state ---
     /// The current view.
     view: View,
@@ -238,3 +250,17 @@ where
 fn bincode_like_serialize<T: serde::Serialize>(v: &T) -> Vec<u8> {
     bincode::serialize(v).unwrap_or_default()
 }
+
+// todo: implement a timer that can emit timeout event and cancel a timer as well, in this context,
+// we need to start the timer with 3 delta on the start of a view, once we made the decision to
+// commit a proposal, we need to cancel the timer, and if the timer expires, we need to send a
+// timeout message to the network to form a quorum timeout certificate for liveness.
+
+// todo: view change for slow client.
+//  if there are over quorum votes of specific higher view than the local validator, then the local
+//  might be a slow client, we need to change the view to catch up to the faster clients.
+// todo: view change from the underlying blockchain execution layer.
+//  if the execution layer already applied higher view from p2p synchronization layer, we need to
+//  change the view to catch up to the execution layer as well. Thus, we need a subscriber to subscribe
+//  the view change event from the state machine (the underlying blockchain), and if the view
+//  is higher than the local view, we need to change the view to catch up.
