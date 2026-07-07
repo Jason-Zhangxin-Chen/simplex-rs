@@ -23,7 +23,7 @@ pub struct Config {
 impl Config {
     /// Calculate the timeout for a given view using exponential back-off capped at
     /// `base * 2^(view)` up to a reasonable maximum.
-    pub fn view_timeout(&self, view: super::types::View) -> Duration {
+    pub fn view_timeout(&self, view: super::types::Height) -> Duration {
         let exp = view.min(10); // cap the exponent
         self.view_timeout_base * 2u32.pow(exp as u32)
     }

@@ -1,13 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+/// Delta, the number of milliseconds a replica waits for a decision before timing out and moving 
+/// to the next view. This comes from the assumption of all BFT algorithm in the partial synchronous
+/// model, where the network is assumed to be synchronous after some unknown global stabilization 
+/// time (GST).
+/// The raw paper use a fix 3*Delta timeout, it assumes that slow client can always catch up within
+/// 3 times of delta time window, but in reality, we consider an exponential backoff timeout, 
+/// where the timeout is increased by a factor of 2 for the continuously accumulating number of 
+/// timeout view changes, to avoid unnecessary view changes due to slow clients.
+pub const DELTA: u64 = 500; // 500ms
+
+/// Dummy block hash. On timeout, each node vote for a dummy block to form a timeout certificate.
+pub const DUMMY_BLOCK_HASH: Digest = [0u8; 32];
+
 /// Identifies a replica (validator) in the consensus group.
-pub type NodeId = u64;
+pub type NodeId = usize;
 
-/// A monotonically increasing view number. Each view has a designated leader.
-pub type View = u64;
-
-/// A sequence number for client requests / committed commands.
-pub type Sequence = u64;
+/// A monotonically increasing height number. Each height has a designated leader.
+pub type Height = u64;
 
 /// A cryptographic hash digest.
 pub type Digest = [u8; 32];
@@ -33,12 +43,12 @@ impl CommitteeSet {
     }
 
     /// Returns the leader for the given view (round-robin).
-    pub fn leader_of(&self, view: View) -> NodeId {
+    pub fn leader_of(&self, view: Height) -> NodeId {
         self.nodes[(view as usize) % self.nodes.len()]
     }
 
     /// Returns true iff `id` is the leader of `view`.
-    pub fn is_leader_of(&self, id: NodeId, view: View) -> bool {
+    pub fn is_leader_of(&self, id: NodeId, view: Height) -> bool {
         self.leader_of(view) == id
     }
 }
