@@ -35,6 +35,10 @@ pub struct Simplex<P, N, S, C, K> {
     // If A crashes without a recovery, then B, C, D recovery to make new decision P2 to V_n+1,
     // which will cause a safety issue, because A has already committed P1 to V_n+1.
 
+    // The WAL should base on a MMap file which bypass the context switching to reduce the latency,
+    // and the WAL should be flushed to disk before the commit decision is made, so that if a
+    // disaster happens, the WAL can be used to recover the state of the engine.
+
     // --- Protocol state ---
     /// The current view.
     view: View,
