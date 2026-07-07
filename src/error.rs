@@ -14,8 +14,8 @@ pub enum ConsensusError {
     /// The view number is too far behind and the message cannot be processed.
     #[error("stale view: message from view {msg_view}, current view {current_view}")]
     StaleView {
-        msg_view: crate::types::View,
-        current_view: crate::types::View,
+        msg_view: crate::types::Height,
+        current_view: crate::types::Height,
     },
 
     /// Network / IO error (wraps the underlying transport error).
