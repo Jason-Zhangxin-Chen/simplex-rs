@@ -12,17 +12,17 @@ pub type Sequence = u64;
 /// A cryptographic hash digest.
 pub type Digest = [u8; 32];
 
-/// The set of replicas that participate in consensus.
+/// The set of validators that participate in consensus.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReplicaSet {
-    /// All replica ids in canonical order.
+pub struct CommitteeSet {
+    /// All validator ids in canonical order.
     pub nodes: Vec<NodeId>,
-    /// The minimum number of honest replicas we assume: `n = 3f + 1`.
+    /// The minimum number of honest validators we assume: `n = 3f + 1`.
     pub f: usize,
 }
 
-impl ReplicaSet {
-    /// Total number of replicas `n`.
+impl CommitteeSet {
+    /// Total number of validators `n`.
     pub fn n(&self) -> usize {
         self.nodes.len()
     }
