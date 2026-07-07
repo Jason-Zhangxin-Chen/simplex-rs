@@ -37,4 +37,4 @@ pub use error::ConsensusError;
 pub use network::Network;
 pub use protocol::Simplex;
 pub use state::StateMachine;
-pub use types::{Digest, NodeId, CommitteeSet, Sequence, View};
+pub use types::{Digest, NodeId, CommitteeSet, Height};

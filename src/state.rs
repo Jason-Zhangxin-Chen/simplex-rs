@@ -1,4 +1,4 @@
-use crate::types::{Digest, Sequence};
+use crate::types::{Digest};
 
 /// Abstraction over the replicated state machine (blockchain, KV store, etc.).
 ///
@@ -13,7 +13,6 @@ pub trait StateMachine<P>: Send + Sync {
     /// Returns a digest of the new state after applying this batch.
     fn apply(
         &mut self,
-        sequence: Sequence,
         batch: &[P],
     ) -> Result<Digest, crate::error::ConsensusError>;
 
@@ -22,4 +21,7 @@ pub trait StateMachine<P>: Send + Sync {
     
     /// todo: add a subscriber that the clients can subscribe the chain head event to update the
     /// latest view from consensus engine.
+    /// 
+    /// todo: add a subscriber that the clients can subscribe the new mined block on top of 
+    /// chain head. It is being used to propose a new proposal.
 }
